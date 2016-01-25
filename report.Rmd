@@ -1,0 +1,82 @@
+---
+title: "HAR Machine Learning"
+author: "Patrick Siu"
+date: "January 25, 2016"
+output: html_document
+---
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+###Project Goal
+
+We will use public data sourced from http://groupware.les.inf.puc-rio.br/har to evaluate accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The project will attempt to predict the manner in which the exercise was performed.
+
+##Data Loading
+
+```{r library_load, echo = FALSE, warning = FALSE, message = FALSE}
+library(dplyr)
+#library(ggplot2)
+library(printr)
+library(caret)
+
+##Suppress scientific notation
+options(scipen=999)
+
+```
+
+```{r data_loading, cache=TRUE}
+rawDataFile_training <- "pml-training.csv"
+downloadURL_training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+rawDataFile_test <- "pml-testing.csv"
+downloadURL_test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+##Ensure raw data file exists
+if(!file.exists(rawDataFile_training)){
+    download.file(downloadURL_training, rawDataFile_training)
+}
+if(!file.exists(rawDataFile_test)){
+    download.file(downloadURL_test, rawDataFile_test)
+}
+
+##Load raw data
+training <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+
+####Exploratory Analysis
+
+```{r exploratory}
+dim(training)
+str(training$classe)
+
+dim(test)
+```
+
+Notes:  Within the training set, the "classe" column is the outcome that we want to predict.  The test set has the same number of columns, but the classe column is replaced by problem_id.
+
+###Tidy Data Set
+
+```{r tidy_data}
+
+
+
+```
+
+###Prediction model selection
+
+###Partitioning the data
+
+Test, validation, training
+
+###Training the Model
+
+Accuracy
+
+###Model Prediction
+
+Accuracy
+
+#Appendix
