@@ -9,17 +9,28 @@ output: html_document
 
 Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
 
-###Project Goal
+##Project Goal
 
 We will use public data sourced from http://groupware.les.inf.puc-rio.br/har to evaluate accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The project will attempt to predict the manner in which the exercise was performed.
 
 ##Data Loading
 
 ```{r library_load, echo = FALSE, warning = FALSE, message = FALSE}
-library(dplyr)
+library(plyr)
+#library(dplyr)
 #library(ggplot2)
-library(printr)
+#library(printr)
 library(caret)
+library(randomForest)
+library(gbm)
+library(rattle)
+library(rpart)
+
+### Parallel processing
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
 
 ##Suppress scientific notation
 options(scipen=999)
@@ -42,11 +53,11 @@ if(!file.exists(rawDataFile_test)){
 }
 
 ##Load raw data
-training <- read.csv("pml-training.csv")
-test <- read.csv("pml-testing.csv")
+training <- read.csv("pml-training.csv", na.strings = c("NA", "", "#DIV/0!")) #Converting invalid answers to NA
+test <- read.csv("pml-testing.csv", na.strings = c("NA", "", "#DIV/0!"))
 ```
 
-####Exploratory Analysis
+##Exploratory Analysis
 
 ```{r exploratory}
 dim(training)
@@ -57,26 +68,129 @@ dim(test)
 
 Notes:  Within the training set, the "classe" column is the outcome that we want to predict.  The test set has the same number of columns, but the classe column is replaced by problem_id.
 
-###Tidy Data Set
+##Tidy Data Set
 
 ```{r tidy_data}
+#Remove unnecessary columns
+remove_fields <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window", "problem_id")
+training <- training[, !(names(training) %in% remove_fields)]
+test <- test[, !(names(test) %in% remove_fields)]  # Apply same treatment to test set
+
+sum(complete.cases(training))  # 0 complete cases!
+sum(complete.cases(test))      # 0 complete cases!
+#Using summary(training), we can see that there are many columns that have 19216 NAs out of 19622 observations. All other columns are complete. We will exclude the columns with NA.
+training <- training[,colSums(is.na(training)) == 0] 
+test <- test[,colSums(is.na(test)) == 0] 
+
+dim(training); dim(test)
+
+nsv <- nearZeroVar(training, saveMetrics=TRUE) #Near Zero Var check shows false for all columns
+```
+
+Tidy data set ready for analysis.  All NAs purged and relevant columns selected.  Training set has one additional column "classe" as the outcome.
 
 
+##Partitioning the data
+
+Given that we are assigned with only 20 rows of test data (0.1%) compared to 19,622 rows of data in the training set, we have an uneven distribution for testing.  Realistically speaking, this test set is actually an evaluation set.  Therefore we will split the training set for 60% training and 40% validation.  We use the term validation instead of test to avoid confusion with the 'evaluation' test set that is given.
+
+This 40% hold out "validation" set is required in order to obtain OOSE (Out of Sample Error)
+
+5 k-fold cross-validation will be used instead of bootstrapping for performance tradeoff.
+
+```{r partition}
+set.seed(628)  #Reproducibility
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+
+validation <- training[-inTrain,]
+training <- training[inTrain,]  ## Note:  Destructive edit
+dim(training)
+dim(validation)
+```
+
+
+##Training the Model
+
+We will run three different models and select the one with the highest accuracy.
+
+```{r training, cache = TRUE}
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+#Recursive Partitioning for Classification, Rgression, and Survival Trees (RPART)
+modFit_rpart <- train(classe ~ .,method="rpart",data=training)
+print(modFit_rpart$finalModel)
+
+pred_rpart <- predict(modFit_rpart, validation)
+validation$predRight <- pred_rpart==validation$classe
+
+accuracy_rpart <- as.numeric(confusionMatrix(validation$classe, pred_rpart)$overall[1])
+round(accuracy_rpart * 100, 2)
+
+#Random Forest (RF)
+#modFit_rf <- train(classe~ .,data=training,method="rf",prox=TRUE)
+modFit_rf <- randomForest(classe ~ ., data = training, trControl = fitControl)  #randomForest package significantly faster than caret package
+print(modFit_rf)
+
+pred_rf <- predict(modFit_rf, validation)
+validation$predRight <- pred_rf==validation$classe
+
+accuracy_rf <- as.numeric(confusionMatrix(validation$classe, pred_rf)$overall[1])
+round(accuracy_rf * 100, 2)
+
+#Generalized Boosted Regression Models (GBM)
+modFit_gbm <- train(classe ~ ., method="gbm",data=training,verbose=FALSE, trControl = fitControl)
+print(modFit_gbm)
+
+pred_gbm <- predict(modFit_gbm, validation)
+validation$predRight <- pred_gbm==validation$classe
+
+accuracy_gbm <- as.numeric(confusionMatrix(validation$classe, pred_gbm)$overall[1])
+round(accuracy_gbm * 100, 2)
+
+stopCluster(cluster)
 
 ```
 
-###Prediction model selection
+Based on validation data set:
 
-###Partitioning the data
+* RPART accuracy `r round(accuracy_rpart * 100, 2)`%
 
-Test, validation, training
+* RF accuracy `r round(accuracy_rf * 100, 2)`%
 
-###Training the Model
+* GBM accuracy `r round(accuracy_gbm * 100, 2)`%
 
-Accuracy
 
-###Model Prediction
+##Select Final Model and Predict on Test Set
 
-Accuracy
+Random Forest model has the highest accuracy at `r round(accuracy_rf * 100, 2)`%.  We will use this as our final model.
+
+```{r prediction_model}
+
+pred <- predict(modFit_rf, test)
+print(pred) #Final results
+
+```
+
+**Final Model Accuracy:  `r round(accuracy_rf * 100, 2)`%**
+
+**Final Model Out of Sample Error:  `r round((1 - accuracy_rf) * 100, 2)`%**
+
+<hr>
 
 #Appendix
+
+####A quick visualization using rpart.  Relatively low accuracy but easy interpretability
+```{r fancy_plot}
+fancyRpartPlot(modFit_rpart$finalModel)
+```
+
+<br>
+
+####[Random Forest] error rates over number of trees
+
+```{r error_rates}
+plot(modFit_rf, log="y")
+```
